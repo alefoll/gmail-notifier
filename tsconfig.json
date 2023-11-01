@@ -1,0 +1,18 @@
+{
+    "compilerOptions": {
+        "rootDir": "src",
+        "esModuleInterop": true,
+        "lib": [
+            "dom",
+            "dom.iterable",
+            "ESNext"
+        ],
+        "typeRoots": ["./types"],
+        "moduleResolution": "Bundler",
+        "resolveJsonModule": true,
+        "outDir": "dist",
+        "strict": true,
+        "target": "ES2022",
+        "module": "ES2022"
+    }
+}

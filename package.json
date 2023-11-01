@@ -1,0 +1,19 @@
+{
+  "name": "gmail-notifier",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsc",
+    "dev:watch": "tsc --watch",
+    "start": "web-ext run --source-dir .",
+    "start:devtools": "web-ext run --source-dir . --devtools"
+  },
+  "type": "module",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "typescript": "^5.2.2",
+    "web-ext": "^7.8.0"
+  }
+}

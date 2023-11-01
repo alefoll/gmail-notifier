@@ -1,0 +1,36 @@
+{
+    "manifest_version": 3,
+    "name": "Gmail Notifier",
+    "version": "0.1.0",
+    "description": "Get notification for your emails",
+    "icons": {
+        "48": "icons/icon-unread-48.png",
+        "92": "icons/icon-unread-92.png"
+    },
+    "action": {
+        "default_area": "navbar"
+    },
+    "background": {
+        "scripts": [
+            "dist/background/main.js"
+        ]
+    },
+    "host_permissions": [
+        "*://www.googleapis.com/*",
+        "*://oauth2.googleapis.com/*"
+    ],
+    "permissions": [
+        "activeTab",
+        "identity",
+        "menus",
+        "notifications",
+        "storage",
+        "tabs"
+    ],
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "gmailnotifier@le-foll.fr",
+            "strict_min_version": "119.0"
+        }
+    }
+}
