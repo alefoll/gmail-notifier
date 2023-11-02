@@ -8,6 +8,15 @@ declare global {
                 text: string,
             }) => void,
         },
+        alarms: {
+            create: (name: string, opts: {
+                periodInMinutes: number,
+                when: number,
+            }) => void,
+            onAlarm: {
+                addListener: (callback: () => void) => void,
+            },
+        },
         identity: {
             getRedirectURL: () => string,
             launchWebAuthFlow: (opts: {

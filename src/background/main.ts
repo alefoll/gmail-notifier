@@ -1,8 +1,6 @@
 const clientId = "910513932868-lgh57u3h6ks6tmddivhjr6hqn8cgau0i.apps.googleusercontent.com";
 const clientSecret = "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";
 
-const wait = (delay: number) => new Promise((resolve) => setTimeout(resolve, delay));
-
 class JWT {
     private b64DecodeUnicode(str: string) {
         return decodeURIComponent(
@@ -167,6 +165,8 @@ async function fetchTokenFromCode(code: string): Promise<Account> {
     };
 }
 
+const messageNotificationShown = new Set();
+
 class AccountProcessing {
     private access_token: string;
     private email: string;
@@ -293,46 +293,40 @@ class AccountProcessing {
     }
 
     async run(onUpdate: (messages: Message[]) => void) {
-        const messageNotificationShown = new Set();
+        const messageIds = await this.getUnreadMessageIds();
 
-        while (true) {
-            const messageIds = await this.getUnreadMessageIds();
+        const messages = await this.getMessagesFromIds(messageIds);
 
-            const messages = await this.getMessagesFromIds(messageIds);
+        onUpdate(messages);
 
-            onUpdate(messages);
-
-            for (let message of messages) {
-                if (messageNotificationShown.has(message.id)) {
-                    continue;
-                }
-
-                const header = new Map(message.payload.headers.map(element => [element.name, element.value]));
-
-                const headerFrom = header.get("From");
-                const headerSubject = header.get("Subject");
-                const headerTo = header.get("To");
-
-                if (!headerFrom || !headerSubject || !headerTo) {
-                    throw new Error(`Invalid header for message id: ${ message.id }. Data: ${ JSON.stringify(message) }`);
-                }
-
-                const headerFromtWithoutEmail = headerFrom.replace(/ <.*@.*>/, "");
-                const headerToWithoutBrackets = headerTo.replaceAll(/<|>/g, "");
-
-                const notificationImageUrl = browser.runtime.getURL("../icons/icon-notification.png");
-
-                browser.notifications.create(message.id, {
-                    iconUrl: notificationImageUrl,
-                    message: `${ headerFromtWithoutEmail }\n${ headerSubject }`,
-                    title: headerToWithoutBrackets,
-                    type: "basic",
-                });
-
-                messageNotificationShown.add(message.id);
+        for (let message of messages) {
+            if (messageNotificationShown.has(message.id)) {
+                continue;
             }
 
-            await wait(15_000);
+            const header = new Map(message.payload.headers.map(element => [element.name, element.value]));
+
+            const headerFrom = header.get("From");
+            const headerSubject = header.get("Subject");
+            const headerTo = header.get("To");
+
+            if (!headerFrom || !headerSubject || !headerTo) {
+                throw new Error(`Invalid header for message id: ${ message.id }. Data: ${ JSON.stringify(message) }`);
+            }
+
+            const headerFromtWithoutEmail = headerFrom.replace(/ <.*@.*>/, "");
+            const headerToWithoutBrackets = headerTo.replaceAll(/<|>/g, "");
+
+            const notificationImageUrl = browser.runtime.getURL("../icons/icon-notification.png");
+
+            browser.notifications.create(message.id, {
+                iconUrl: notificationImageUrl,
+                message: `${ headerFromtWithoutEmail }\n${ headerSubject }`,
+                title: headerToWithoutBrackets,
+                type: "basic",
+            });
+
+            messageNotificationShown.add(message.id);
         }
     }
 }
@@ -356,56 +350,58 @@ async function openGmailForIndex(index: number, currentTab: { url: string }) {
         return;
     }
 
-        browser.tabs.create({ url: `${ pattern }#inbox` });
+    browser.tabs.create({ url: `${ pattern }#inbox` });
 }
 
-async function main() {
-    const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
+const allUpdatesByAccount: Map<string, Message[]> = new Map();
+browser.action.onClicked.addListener(async(currentTab) => {
+    const hasUnreadEmail = [...allUpdatesByAccount.values()].flat().length > 0;
 
+    if (!hasUnreadEmail) {
+        openGmailForIndex(0, currentTab);
+
+        return;
+    }
+
+    const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
     const accounts = storage?.accounts || [];
 
-    const allUpdatesByAccount: Map<string, Message[]> = new Map();
+    // How many account by index have email?
+    const accountIndexWithMail = accounts.map(e => allUpdatesByAccount.get(e.email)?.length || 0);
 
-    browser.action.onClicked.addListener(async(currentTab) => {
-        const hasUnreadEmail = [...allUpdatesByAccount.values()].flat().length > 0;
-
-        if (!hasUnreadEmail) {
-            openGmailForIndex(0, currentTab);
-
+    accountIndexWithMail.map((value, index) => {
+        if (value === 0) {
             return;
         }
 
-        // How many account by index have email?
-        const accountIndexWithMail = accounts.map(e => allUpdatesByAccount.get(e.email)?.length || 0);
-
-        accountIndexWithMail.map((value, index) => {
-            if (value === 0) {
-                return;
-            }
-
-            openGmailForIndex(index, currentTab);
-        });
+        openGmailForIndex(index, currentTab);
     });
+});
 
-    browser.menus.create({
-        contexts: ["all"],
-        id: "add_account",
-        title: "Add an account",
-    });
+browser.menus.create({
+    contexts: ["all"],
+    id: "add_account",
+    title: "Add an account",
+});
 
-    browser.menus.create({
-        contexts: ["all"],
-        id: "separator",
-        type: "separator",
-    });
+browser.menus.create({
+    contexts: ["all"],
+    id: "separator",
+    type: "separator",
+});
 
-    browser.menus.onClicked.addListener(async(element) => {
-        if (element.menuItemId === "add_account") {
-            const code = await authorize();
+browser.menus.onClicked.addListener(async(element) => {
+    if (element.menuItemId === "add_account") {
+        const code = await authorize();
 
-            await fetchTokenFromCode(code);
-        }
-    });
+        await fetchTokenFromCode(code);
+    }
+});
+
+browser.alarms.onAlarm.addListener(async() => {
+    console.log("RUUUUUUUUUUUUUUUUN");
+    const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
+    const accounts = storage?.accounts || [];
 
     for (let account of accounts) {
         browser.menus.create({
@@ -432,6 +428,9 @@ async function main() {
 
         processing.run(onUpdate);
     }
-}
+});
 
-main();
+browser.alarms.create("run", {
+    periodInMinutes: 0.25,
+    when: Date.now(),
+});
