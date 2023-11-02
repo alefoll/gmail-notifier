@@ -18,9 +18,14 @@ declare global {
         },
         menus: {
             create: (opts: {
-                contexts: ["all"]
+                contexts: ["all"],
+                enabled?: boolean,
+                icons?: {
+                    96: string,
+                },
                 id: string,
-                title: string,
+                title?: string,
+                type?: "normal" | "separator",
             }) => void,
             onClicked: {
                 addListener: (listener: (element: { menuItemId?: string }) => void) => void

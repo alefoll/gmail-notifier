@@ -82,7 +82,7 @@ async function authorize(): Promise<string> {
         "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.metadata",
-        "openid email",
+        "openid profile email",
     ];
 
     url.searchParams.append("access_type", accessType);
@@ -91,7 +91,6 @@ async function authorize(): Promise<string> {
     url.searchParams.append("redirect_uri", redirectUri);
     url.searchParams.append("response_type", responseType);
     url.searchParams.append("scope", scopes.join(" "));
-
 
     const returnLink = await browser.identity.launchWebAuthFlow({
         interactive: true,
@@ -146,12 +145,15 @@ async function fetchTokenFromCode(code: string): Promise<Account> {
                 ...accounts, {
                     access_token,
                     email: userInfo.email,
+                    picture: userInfo.picture,
                     refresh_token,
                 }
             ]
         });
     } else {
         account.access_token = access_token;
+        account.email = userInfo.email;
+        account.picture = userInfo.picture;
         account.refresh_token = refresh_token;
 
         await browser.storage.local.set({ accounts });
@@ -160,45 +162,10 @@ async function fetchTokenFromCode(code: string): Promise<Account> {
     return {
         access_token,
         email: userInfo.email,
+        picture: userInfo.picture,
         refresh_token,
     };
 }
-
-browser.action.onClicked.addListener(async(currentTab) => {
-    const pattern = "https://mail.google.com/mail/u/";
-
-    if (currentTab.url.startsWith(pattern)) {
-        return;
-    }
-
-    const tabsAlreadyOpened = await browser.tabs.query({
-        currentWindow: true,
-        url: `${ pattern }*`
-    });
-
-    if (tabsAlreadyOpened.length > 0) {
-        browser.tabs.update(tabsAlreadyOpened[0].id, {
-            active: true,
-        });
-        return;
-    }
-
-    browser.tabs.create({ url: `${ pattern }0/#inbox` });
-});
-
-browser.menus.create({
-    contexts: ["all"],
-    id: "root",
-    title: "Add an account",
-});
-
-browser.menus.onClicked.addListener(async(element) => {
-    if (element.menuItemId === "root") {
-        const code = await authorize();
-
-        await fetchTokenFromCode(code);
-    }
-});
 
 class AccountProcessing {
     private access_token: string;
@@ -262,11 +229,13 @@ class AccountProcessing {
         const account = accounts.find(account => account.email === this.email);
 
         if (!account) {
+
             await browser.storage.local.set({
                 accounts: [
                     ...accounts, {
                         access_token,
                         email: this.email,
+                        picture: "",
                         refresh_token: this.refresh_token,
                     }
                 ]
@@ -278,6 +247,7 @@ class AccountProcessing {
         account.access_token = access_token;
 
         await browser.storage.local.set({ accounts });
+
     }
 
     private async getMessagesFromIds(messageIds: string[]): Promise<Message[]> {
@@ -315,12 +285,14 @@ class AccountProcessing {
         url.searchParams.append("labelIds", "UNREAD");
         url.searchParams.append("labelIds", "INBOX");
 
-        const result = await this.callApi<{ messages: Pick<Message, "id">[]}>(url);
+        const result = await this.callApi<{ messages?: Pick<Message, "id">[]}>(url);
 
-        return result.messages.map(message => message.id);
+        const messages = result.messages || [];
+
+        return messages.map(message => message.id);
     }
 
-    async run() {
+    async run(onUpdate: (messages: Message[]) => void) {
         const messageNotificationShown = new Set();
 
         while (true) {
@@ -328,17 +300,7 @@ class AccountProcessing {
 
             const messages = await this.getMessagesFromIds(messageIds);
 
-            browser.action.setBadgeText({
-                text: messages.length.toString(),
-            });
-
-            // browser.notifications.onClicked.addListener((noticationId) => {
-            //     const message = messages.find(message => message.id === noticationId);
-
-            //     if (!message) {
-            //         return;
-            //     }
-            // });
+            onUpdate(messages);
 
             for (let message of messages) {
                 if (messageNotificationShown.has(message.id)) {
@@ -356,13 +318,14 @@ class AccountProcessing {
                 }
 
                 const headerFromtWithoutEmail = headerFrom.replace(/ <.*@.*>/, "");
+                const headerToWithoutBrackets = headerTo.replaceAll(/<|>/g, "");
 
                 const notificationImageUrl = browser.runtime.getURL("../icons/icon-notification.png");
 
                 browser.notifications.create(message.id, {
                     iconUrl: notificationImageUrl,
                     message: `${ headerFromtWithoutEmail }\n${ headerSubject }`,
-                    title: headerTo,
+                    title: headerToWithoutBrackets,
                     type: "basic",
                 });
 
@@ -374,15 +337,100 @@ class AccountProcessing {
     }
 }
 
+async function openGmailForIndex(index: number, currentTab: { url: string }) {
+    const pattern = `https://mail.google.com/mail/u/${ index }/`;
+
+    if (currentTab.url.startsWith(pattern)) {
+        return;
+    }
+
+    const tabsAlreadyOpened = await browser.tabs.query({
+        currentWindow: true,
+        url: `${ pattern }*`
+    });
+
+    if (tabsAlreadyOpened.length > 0) {
+        browser.tabs.update(tabsAlreadyOpened[0].id, {
+            active: true,
+        });
+        return;
+    }
+
+        browser.tabs.create({ url: `${ pattern }#inbox` });
+}
+
 async function main() {
     const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
 
     const accounts = storage?.accounts || [];
 
+    const allUpdatesByAccount: Map<string, Message[]> = new Map();
+
+    browser.action.onClicked.addListener(async(currentTab) => {
+        const hasUnreadEmail = [...allUpdatesByAccount.values()].flat().length > 0;
+
+        if (!hasUnreadEmail) {
+            openGmailForIndex(0, currentTab);
+
+            return;
+        }
+
+        // How many account by index have email?
+        const accountIndexWithMail = accounts.map(e => allUpdatesByAccount.get(e.email)?.length || 0);
+
+        accountIndexWithMail.map((value, index) => {
+            if (value === 0) {
+                return;
+            }
+
+            openGmailForIndex(index, currentTab);
+        });
+    });
+
+    browser.menus.create({
+        contexts: ["all"],
+        id: "add_account",
+        title: "Add an account",
+    });
+
+    browser.menus.create({
+        contexts: ["all"],
+        id: "separator",
+        type: "separator",
+    });
+
+    browser.menus.onClicked.addListener(async(element) => {
+        if (element.menuItemId === "add_account") {
+            const code = await authorize();
+
+            await fetchTokenFromCode(code);
+        }
+    });
+
     for (let account of accounts) {
+        browser.menus.create({
+            contexts: ["all"],
+            enabled: false,
+            icons: {
+                96: account.picture,
+            },
+            id: account.email,
+            title: account.email,
+        });
+
         const processing = new AccountProcessing(account);
 
-        processing.run();
+        const onUpdate = (messages: Message[]) => {
+            allUpdatesByAccount.set(account.email, messages);
+
+            const allMessages = [...allUpdatesByAccount.values()].flat();
+
+            browser.action.setBadgeText({
+                text: allMessages.length === 0 ? "" : allMessages.length.toString(),
+            });
+        }
+
+        processing.run(onUpdate);
     }
 }
 
