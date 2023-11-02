@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Gmail Notifier",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "Get notification for your emails",
     "icons": {
         "48": "icons/icon-unread-48.png",
@@ -20,7 +20,6 @@
         "*://oauth2.googleapis.com/*"
     ],
     "permissions": [
-        "activeTab",
         "alarms",
         "identity",
         "menus",

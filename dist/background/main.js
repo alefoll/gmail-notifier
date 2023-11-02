@@ -299,7 +299,6 @@ browser.menus.onClicked.addListener(async (element) => {
     }
 });
 browser.alarms.onAlarm.addListener(async () => {
-    console.log("RUUUUUUUUUUUUUUUUN");
     const storage = await browser.storage.local.get("accounts");
     const accounts = storage?.accounts || [];
     for (let account of accounts) {
