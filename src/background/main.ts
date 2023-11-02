@@ -1,5 +1,15 @@
 const clientId = "910513932868-lgh57u3h6ks6tmddivhjr6hqn8cgau0i.apps.googleusercontent.com";
 const clientSecret = "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";
+const icons = {
+    read: {
+        48: browser.runtime.getURL("../icons/icon-read-48.png"),
+        92: browser.runtime.getURL("../icons/icon-read-92.png"),
+    },
+    unread: {
+        48: browser.runtime.getURL("../icons/icon-unread-48.png"),
+        92: browser.runtime.getURL("../icons/icon-unread-92.png"),
+    },
+};
 
 class JWT {
     private b64DecodeUnicode(str: string) {
@@ -319,7 +329,7 @@ class AccountProcessing {
 
             const notificationImageUrl = browser.runtime.getURL("../icons/icon-notification.png");
 
-            browser.notifications.create(message.id, {
+            browser.notifications.create(`${ this.email }<TAG>${ message.id }`, {
                 iconUrl: notificationImageUrl,
                 message: `${ headerFromtWithoutEmail }\n${ headerSubject }`,
                 title: headerToWithoutBrackets,
@@ -331,10 +341,19 @@ class AccountProcessing {
     }
 }
 
-async function openGmailForIndex(index: number, currentTab: { url: string }) {
+async function openGmail({
+    currentTab,
+    index,
+    messageId,
+}: {
+    currentTab?: { url: string },
+    index: number,
+    messageId?: string
+}) {
     const pattern = `https://mail.google.com/mail/u/${ index }/`;
+    const messageHash = messageId ? `/${ messageId }` : "";
 
-    if (currentTab.url.startsWith(pattern)) {
+    if (currentTab && currentTab.url.startsWith(`${ pattern }#inbox${ messageHash }`)) {
         return;
     }
 
@@ -346,11 +365,12 @@ async function openGmailForIndex(index: number, currentTab: { url: string }) {
     if (tabsAlreadyOpened.length > 0) {
         browser.tabs.update(tabsAlreadyOpened[0].id, {
             active: true,
+            url: `${ pattern }#inbox${ messageHash }`
         });
         return;
     }
 
-    browser.tabs.create({ url: `${ pattern }#inbox` });
+    browser.tabs.create({ url: `${ pattern }#inbox${ messageHash }` });
 }
 
 const allUpdatesByAccount: Map<string, Message[]> = new Map();
@@ -358,7 +378,7 @@ browser.action.onClicked.addListener(async(currentTab) => {
     const hasUnreadEmail = [...allUpdatesByAccount.values()].flat().length > 0;
 
     if (!hasUnreadEmail) {
-        openGmailForIndex(0, currentTab);
+        openGmail({ index: 0, currentTab });
 
         return;
     }
@@ -366,15 +386,17 @@ browser.action.onClicked.addListener(async(currentTab) => {
     const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
     const accounts = storage?.accounts || [];
 
-    // How many account by index have email?
-    const accountIndexWithMail = accounts.map(e => allUpdatesByAccount.get(e.email)?.length || 0);
+    // How many account by index have unread emails?
+    accounts.map((account, index) => {
+        const unreadMessages = allUpdatesByAccount.get(account.email);
 
-    accountIndexWithMail.map((value, index) => {
-        if (value === 0) {
+        if (!unreadMessages || unreadMessages.length === 0) {
             return;
         }
 
-        openGmailForIndex(index, currentTab);
+        const messageId = unreadMessages[0].id;
+
+        openGmail({ index, currentTab, messageId });
     });
 });
 
@@ -396,6 +418,25 @@ browser.menus.onClicked.addListener(async(element) => {
 
         await fetchTokenFromCode(code);
     }
+});
+
+browser.notifications.onClicked.addListener(async(notificationId) => {
+    const [accountEmail, messageId] = notificationId.split("<TAG>");
+
+    if (!accountEmail || !messageId) {
+        return;
+    }
+
+    const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
+    const accounts = storage?.accounts || [];
+
+    const accountIndex = accounts.findIndex(element => element.email === accountEmail);
+
+    if (accountIndex < 0) {
+        return;
+    }
+
+    openGmail({ index: accountIndex, messageId });
 });
 
 browser.alarms.onAlarm.addListener(async() => {
@@ -420,9 +461,13 @@ browser.alarms.onAlarm.addListener(async() => {
 
             const allMessages = [...allUpdatesByAccount.values()].flat();
 
+            const unreadMessages = allMessages.length;
+
             browser.action.setBadgeText({
-                text: allMessages.length === 0 ? "" : allMessages.length.toString(),
+                text: unreadMessages === 0 ? "" : unreadMessages.toString(),
             });
+
+            browser.action.setIcon({ path: unreadMessages ? icons.unread : icons.read });
         }
 
         processing.run(onUpdate);

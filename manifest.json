@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "Gmail Notifier",
-    "version": "0.2.2",
+    "version": "0.3.0",
     "description": "Get notification for your emails",
     "icons": {
         "48": "icons/icon-unread-48.png",
@@ -27,6 +27,7 @@
         "storage",
         "tabs"
     ],
+    "incognito": "not_allowed",
     "browser_specific_settings": {
         "gecko": {
             "id": "gmailnotifier@le-foll.fr",

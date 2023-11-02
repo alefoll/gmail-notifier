@@ -7,6 +7,12 @@ declare global {
             setBadgeText: (opts: {
                 text: string,
             }) => void,
+            setIcon: (opts: {
+                path: {
+                    48: string,
+                    92: string,
+                },
+            }) => void,
         },
         alarms: {
             create: (name: string, opts: {
@@ -74,6 +80,7 @@ declare global {
             }) => Promise<{ id: number }[]>,
             update: (tabId: number, opts: {
                 active: boolean,
+                url?: string,
             }) => Promise<void>
         },
     }
