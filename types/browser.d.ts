@@ -33,7 +33,7 @@ declare global {
         },
         menus: {
             create: (opts: {
-                contexts: ["all"],
+                contexts: ["action"],
                 enabled?: boolean,
                 icons?: {
                     96: string,

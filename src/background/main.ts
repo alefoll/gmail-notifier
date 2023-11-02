@@ -175,7 +175,10 @@ async function fetchTokenFromCode(code: string): Promise<Account> {
     };
 }
 
-const messageNotificationShown = new Set();
+// messageId, timeToReShownTheNotification
+const notificationHistory = new Map<string, number>();
+// Re shown the notification after 5 minutes
+const notificationReShownDelay = 300_000;
 
 class AccountProcessing {
     private access_token: string;
@@ -239,7 +242,6 @@ class AccountProcessing {
         const account = accounts.find(account => account.email === this.email);
 
         if (!account) {
-
             await browser.storage.local.set({
                 accounts: [
                     ...accounts, {
@@ -310,7 +312,9 @@ class AccountProcessing {
         onUpdate(messages);
 
         for (let message of messages) {
-            if (messageNotificationShown.has(message.id)) {
+            const notification = notificationHistory.get(message.id);
+
+            if (notification && Date.now() < notification) {
                 continue;
             }
 
@@ -336,7 +340,7 @@ class AccountProcessing {
                 type: "basic",
             });
 
-            messageNotificationShown.add(message.id);
+            notificationHistory.set(message.id, Date.now() + notificationReShownDelay);
         }
     }
 }
@@ -401,15 +405,9 @@ browser.action.onClicked.addListener(async(currentTab) => {
 });
 
 browser.menus.create({
-    contexts: ["all"],
+    contexts: ["action"],
     id: "add_account",
     title: "Add an account",
-});
-
-browser.menus.create({
-    contexts: ["all"],
-    id: "separator",
-    type: "separator",
 });
 
 browser.menus.onClicked.addListener(async(element) => {
@@ -443,9 +441,17 @@ browser.alarms.onAlarm.addListener(async() => {
     const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
     const accounts = storage?.accounts || [];
 
+    if (accounts.length > 0) {
+        browser.menus.create({
+            contexts: ["action"],
+            id: "separator",
+            type: "separator",
+        });
+    }
+
     for (let account of accounts) {
         browser.menus.create({
-            contexts: ["all"],
+            contexts: ["action"],
             enabled: false,
             icons: {
                 96: account.picture,
