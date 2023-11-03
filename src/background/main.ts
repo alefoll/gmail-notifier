@@ -75,7 +75,6 @@ class JWT {
             );
         }
     }
-
 }
 
 async function authorize(): Promise<string> {
@@ -141,9 +140,9 @@ async function fetchTokenFromCode(code: string): Promise<Account> {
 
     const userInfo = jwt.decode(id_token);
 
-    const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
+    const storage = await browser.storage.local.get("accounts");
 
-    const accounts = storage?.accounts || [];
+    const accounts: Account[] = storage?.accounts || [];
 
     const account = accounts.find(account => account.email === userInfo.email);
 
@@ -235,9 +234,9 @@ class AccountProcessing {
 
         this.access_token = access_token;
 
-        const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
+        const storage = await browser.storage.local.get("accounts");
 
-        const accounts = storage?.accounts || [];
+        const accounts: Account[] = storage?.accounts || [];
 
         const account = accounts.find(account => account.email === this.email);
 
@@ -350,14 +349,14 @@ async function openGmail({
     index,
     messageId,
 }: {
-    currentTab?: { url: string },
+    currentTab?: { url?: string },
     index: number,
     messageId?: string
 }) {
     const pattern = `https://mail.google.com/mail/u/${ index }/`;
     const messageHash = messageId ? `/${ messageId }` : "";
 
-    if (currentTab && currentTab.url.startsWith(`${ pattern }#inbox${ messageHash }`)) {
+    if (currentTab?.url?.startsWith(`${ pattern }#inbox${ messageHash }`)) {
         return;
     }
 
@@ -387,8 +386,8 @@ browser.action.onClicked.addListener(async(currentTab) => {
         return;
     }
 
-    const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
-    const accounts = storage?.accounts || [];
+    const storage = await browser.storage.local.get("accounts");
+    const accounts: Account[] = storage?.accounts || [];
 
     // How many account by index have unread emails?
     accounts.map((account, index) => {
@@ -425,8 +424,8 @@ browser.notifications.onClicked.addListener(async(notificationId) => {
         return;
     }
 
-    const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
-    const accounts = storage?.accounts || [];
+    const storage = await browser.storage.local.get("accounts");
+    const accounts: Account[] = storage?.accounts || [];
 
     const accountIndex = accounts.findIndex(element => element.email === accountEmail);
 
@@ -438,8 +437,8 @@ browser.notifications.onClicked.addListener(async(notificationId) => {
 });
 
 browser.alarms.onAlarm.addListener(async() => {
-    const storage = await browser.storage.local.get<{ accounts: Account[] | undefined }>("accounts");
-    const accounts = storage?.accounts || [];
+    const storage = await browser.storage.local.get("accounts");
+    const accounts: Account[] = storage?.accounts || [];
 
     if (accounts.length > 0) {
         browser.menus.create({
@@ -480,7 +479,9 @@ browser.alarms.onAlarm.addListener(async() => {
     }
 });
 
-browser.alarms.create("run", {
-    periodInMinutes: 0.25,
-    when: Date.now(),
+browser.runtime.onStartup.addListener(() => {
+    browser.alarms.create("run", {
+        periodInMinutes: 0.25,
+        when: Date.now(),
+    });
 });

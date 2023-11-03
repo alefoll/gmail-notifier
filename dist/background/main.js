@@ -264,7 +264,7 @@ class AccountProcessing {
 async function openGmail({ currentTab, index, messageId, }) {
     const pattern = `https://mail.google.com/mail/u/${index}/`;
     const messageHash = messageId ? `/${messageId}` : "";
-    if (currentTab && currentTab.url.startsWith(`${pattern}#inbox${messageHash}`)) {
+    if (currentTab?.url?.startsWith(`${pattern}#inbox${messageHash}`)) {
         return;
     }
     const tabsAlreadyOpened = await browser.tabs.query({
@@ -356,7 +356,9 @@ browser.alarms.onAlarm.addListener(async () => {
         processing.run(onUpdate);
     }
 });
-browser.alarms.create("run", {
-    periodInMinutes: 0.25,
-    when: Date.now(),
+browser.runtime.onStartup.addListener(() => {
+    browser.alarms.create("run", {
+        periodInMinutes: 0.25,
+        when: Date.now(),
+    });
 });
