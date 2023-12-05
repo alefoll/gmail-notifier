@@ -11,6 +11,7 @@ const icons = {
         92: browser.runtime.getURL("../icons/icon-unread-92.png"),
     },
 };
+const notificationImageUrl = browser.runtime.getURL("../icons/icon-notification.png");
 class JWT {
     b64DecodeUnicode(str) {
         return decodeURIComponent(atob(str).replace(/(.)/g, (m, p) => {
@@ -127,6 +128,7 @@ async function fetchTokenFromCode(code) {
                 }
             ]
         });
+        await createOrRefreshMenuItems();
     }
     else {
         account.access_token = access_token;
@@ -181,14 +183,28 @@ class AccountProcessing {
         url.searchParams.append("refresh_token", this.refresh_token);
         const request = await fetch(url, { method: "POST" });
         const result = await request.json();
-        const { access_token } = result;
-        if (!access_token) {
-            throw new Error(`Error refresh token on : "${JSON.stringify(result)}"`);
-        }
-        this.access_token = access_token;
         const storage = await browser.storage.local.get("accounts");
         const accounts = storage?.accounts || [];
         const account = accounts.find(account => account.email === this.email);
+        const { access_token } = result;
+        if (!access_token) {
+            if (!account) {
+                return;
+            }
+            await browser.storage.local.set({
+                accounts: accounts.filter(account => account.email !== this.email),
+            });
+            await browser.menus.remove(this.email);
+            browser.notifications.create(`remove_account-${this.email}`, {
+                iconUrl: notificationImageUrl,
+                message: `Token for account ${this.email} is no longer working. The account is removed, you will need to add it again.`,
+                title: "Account removed",
+                type: "basic",
+            });
+            await createOrRefreshMenuItems();
+            throw new Error(`Error refresh token on : "${JSON.stringify(result)}"`);
+        }
+        this.access_token = access_token;
         if (!account) {
             await browser.storage.local.set({
                 accounts: [
@@ -200,6 +216,7 @@ class AccountProcessing {
                     }
                 ]
             });
+            await createOrRefreshMenuItems();
             return;
         }
         account.access_token = access_token;
@@ -207,7 +224,7 @@ class AccountProcessing {
     }
     async getMessagesFromIds(messageIds) {
         const result = [];
-        for (let messageId of messageIds) {
+        for (const messageId of messageIds) {
             const cachedMessage = this.cachedMessages.get(messageId);
             if (cachedMessage) {
                 result.push(cachedMessage);
@@ -236,7 +253,7 @@ class AccountProcessing {
         const messageIds = await this.getUnreadMessageIds();
         const messages = await this.getMessagesFromIds(messageIds);
         onUpdate(messages);
-        for (let message of messages) {
+        for (const message of messages) {
             const notification = notificationHistory.get(message.id);
             if (notification && Date.now() < notification) {
                 continue;
@@ -250,7 +267,6 @@ class AccountProcessing {
             }
             const headerFromtWithoutEmail = headerFrom.replace(/ <.*@.*>/, "");
             const headerToWithoutBrackets = headerTo.replaceAll(/<|>/g, "");
-            const notificationImageUrl = browser.runtime.getURL("../icons/icon-notification.png");
             browser.notifications.create(`${this.email}<TAG>${message.id}`, {
                 iconUrl: notificationImageUrl,
                 message: `${headerFromtWithoutEmail}\n${headerSubject}`,
@@ -280,6 +296,31 @@ async function openGmail({ currentTab, index, messageId, }) {
     }
     browser.tabs.create({ url: `${pattern}#inbox${messageHash}` });
 }
+async function createOrRefreshMenuItems() {
+    const storage = await browser.storage.local.get("accounts");
+    const accounts = storage?.accounts || [];
+    if (accounts.length > 0) {
+        await browser.menus.create({
+            contexts: ["action"],
+            id: "separator",
+            type: "separator",
+        });
+    }
+    else {
+        await browser.menus.remove("separator");
+    }
+    for (const account of accounts) {
+        await browser.menus.create({
+            contexts: ["action"],
+            enabled: true,
+            icons: {
+                96: account.picture,
+            },
+            id: account.email,
+            title: account.email,
+        });
+    }
+}
 const allUpdatesByAccount = new Map();
 browser.action.onClicked.addListener(async (currentTab) => {
     const hasUnreadEmail = [...allUpdatesByAccount.values()].flat().length > 0;
@@ -308,7 +349,15 @@ browser.menus.onClicked.addListener(async (element) => {
     if (element.menuItemId === "add_account") {
         const code = await authorize();
         await fetchTokenFromCode(code);
+        return;
     }
+    const storage = await browser.storage.local.get("accounts");
+    const accounts = storage?.accounts || [];
+    const accountIndex = accounts.findIndex(account => account.email === element.menuItemId);
+    if (accountIndex < 0) {
+        return;
+    }
+    openGmail({ index: accountIndex });
 });
 browser.notifications.onClicked.addListener(async (notificationId) => {
     const [accountEmail, messageId] = notificationId.split("<TAG>");
@@ -326,23 +375,8 @@ browser.notifications.onClicked.addListener(async (notificationId) => {
 browser.alarms.onAlarm.addListener(async () => {
     const storage = await browser.storage.local.get("accounts");
     const accounts = storage?.accounts || [];
-    if (accounts.length > 0) {
-        browser.menus.create({
-            contexts: ["action"],
-            id: "separator",
-            type: "separator",
-        });
-    }
-    for (let account of accounts) {
-        browser.menus.create({
-            contexts: ["action"],
-            enabled: false,
-            icons: {
-                96: account.picture,
-            },
-            id: account.email,
-            title: account.email,
-        });
+    await createOrRefreshMenuItems();
+    for (const account of accounts) {
         const processing = new AccountProcessing(account);
         const onUpdate = (messages) => {
             allUpdatesByAccount.set(account.email, messages);
