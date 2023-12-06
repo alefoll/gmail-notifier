@@ -109,7 +109,7 @@ browser.alarms.onAlarm.addListener(async () => {
                 text: allMessages.length === 0 ? "" : allMessages.length.toString(),
             });
 
-            browser.action.setIcon({ path: allMessages.length === 0 ? config.icons.unread : config.icons.read });
+            browser.action.setIcon({ path: allMessages.length === 0 ? config.icons.read : config.icons.unread });
         };
 
         processing.run(onUpdate);
