@@ -5,15 +5,18 @@ export class AccountProcessing {
     private cachedMessages: Map<string, Message> = new Map();
     private refresh_token: string;
 
-    // messageId, timeToReShownTheNotification
-    private notificationHistory = new Map<string, number>();
     // Re shown the notification after 5 minutes
     private notificationReShownDelay = 300_000;
 
-    constructor(private deps: {
-        readonly account: Account,
-        readonly createOrRefreshMenuItems: () => Promise<void>,
-    }) {
+    constructor(
+        private deps: {
+            readonly account: Account;
+            readonly createOrRefreshMenuItems: () => Promise<void>;
+            // NOTE: we have to inject it otherwise it will be destroyed between each alarm
+            // messageId, timeToReShownTheNotification
+            notificationHistory: Map<string, number>;
+        },
+    ) {
         this.access_token = deps.account.access_token;
         this.refresh_token = deps.account.refresh_token;
     }
@@ -25,7 +28,7 @@ export class AccountProcessing {
 
         const request = await fetch(url, {
             headers: {
-                "Authorization": `Bearer ${ this.access_token }`
+                Authorization: `Bearer ${this.access_token}`,
             },
         });
 
@@ -71,16 +74,16 @@ export class AccountProcessing {
 
             await browser.menus.remove(this.deps.account.email);
 
-            browser.notifications.create(`remove_account-${ this.deps.account.email }`, {
+            browser.notifications.create(`remove_account-${this.deps.account.email}`, {
                 iconUrl: config.notificationImageUrl,
-                message: `Token for account ${ this.deps.account.email } is no longer working. The account is removed, you will need to add it again.`,
+                message: `Token for account ${this.deps.account.email} is no longer working. The account is removed, you will need to add it again.`,
                 title: "Account removed",
                 type: "basic",
             });
 
             await this.deps.createOrRefreshMenuItems();
 
-            throw new Error(`Error refresh token on : "${ JSON.stringify(result) }"`);
+            throw new Error(`Error refresh token on : "${JSON.stringify(result)}"`);
         }
 
         this.access_token = access_token;
@@ -88,13 +91,14 @@ export class AccountProcessing {
         if (!account) {
             await browser.storage.local.set({
                 accounts: [
-                    ...accounts, {
+                    ...accounts,
+                    {
                         access_token,
                         email: this.deps.account.email,
                         picture: "",
                         refresh_token: this.refresh_token,
-                    }
-                ]
+                    },
+                ],
             });
 
             await this.deps.createOrRefreshMenuItems();
@@ -105,14 +109,13 @@ export class AccountProcessing {
         account.access_token = access_token;
 
         await browser.storage.local.set({ accounts });
-
     }
 
     private async getMessagesFromIds(messageIds: string[]): Promise<Message[]> {
         const result: Message[] = [];
 
         for (const messageId of messageIds) {
-            const cachedMessage = this.cachedMessages.get(messageId)
+            const cachedMessage = this.cachedMessages.get(messageId);
 
             if (cachedMessage) {
                 result.push(cachedMessage);
@@ -120,7 +123,7 @@ export class AccountProcessing {
                 continue;
             }
 
-            const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${ messageId }`);
+            const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}`);
 
             url.searchParams.append("format", "metadata");
             url.searchParams.append("metadataHeaders", "From");
@@ -129,7 +132,7 @@ export class AccountProcessing {
 
             const message = await this.callApi<Message>(url);
 
-            this.cachedMessages.set(message.id, message)
+            this.cachedMessages.set(message.id, message);
 
             result.push(message);
         }
@@ -143,7 +146,7 @@ export class AccountProcessing {
         url.searchParams.append("labelIds", "UNREAD");
         url.searchParams.append("labelIds", "INBOX");
 
-        const result = await this.callApi<{ messages?: Pick<Message, "id">[]}>(url);
+        const result = await this.callApi<{ messages?: Pick<Message, "id">[]; }>(url);
 
         const messages = result.messages || [];
 
@@ -158,7 +161,7 @@ export class AccountProcessing {
         onUpdate(messages);
 
         for (const message of messages) {
-            const notification = this.notificationHistory.get(message.id);
+            const notification = this.deps.notificationHistory.get(message.id);
 
             if (notification && Date.now() < notification) {
                 continue;
@@ -171,20 +174,20 @@ export class AccountProcessing {
             const headerTo = header.get("To");
 
             if (!headerFrom || !headerSubject || !headerTo) {
-                throw new Error(`Invalid header for message id: ${ message.id }. Data: ${ JSON.stringify(message) }`);
+                throw new Error(`Invalid header for message id: ${message.id}. Data: ${JSON.stringify(message)}`);
             }
 
             const headerFromtWithoutEmail = headerFrom.replace(/ <.*@.*>/, "");
             const headerToWithoutBrackets = headerTo.replaceAll(/<|>/g, "");
 
-            browser.notifications.create(`${ this.deps.account.email }<TAG>${ message.id }`, {
+            browser.notifications.create(`${this.deps.account.email}<TAG>${message.id}`, {
                 iconUrl: config.notificationImageUrl,
-                message: `${ headerFromtWithoutEmail }\n${ headerSubject }`,
+                message: `${headerFromtWithoutEmail}\n${headerSubject}`,
                 title: headerToWithoutBrackets,
                 type: "basic",
             });
 
-            this.notificationHistory.set(message.id, Date.now() + this.notificationReShownDelay);
+            this.deps.notificationHistory.set(message.id, Date.now() + this.notificationReShownDelay);
         }
     }
 }

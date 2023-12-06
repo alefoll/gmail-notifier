@@ -41,7 +41,7 @@ async function authorize(): Promise<string> {
     const code = returnUrl.searchParams.get("code");
 
     if (!code) {
-        throw new Error(`Unable to find the access token in : "${ returnLink }"`);
+        throw new Error(`Unable to find the access token in : "${returnLink}"`);
     }
 
     return code;
@@ -65,7 +65,7 @@ async function fetchTokenFromCode(code: string): Promise<Account> {
     const { access_token, id_token, refresh_token } = result;
 
     if (!access_token || !refresh_token || !id_token) {
-        throw new Error(`Error token on : "${ JSON.stringify(result) }"`);
+        throw new Error(`Error token on : "${JSON.stringify(result)}"`);
     }
 
     const userInfo = jwtDecode<Account>(id_token);
@@ -79,13 +79,14 @@ async function fetchTokenFromCode(code: string): Promise<Account> {
     if (!account) {
         await browser.storage.local.set({
             accounts: [
-                ...accounts, {
+                ...accounts,
+                {
                     access_token,
                     email: userInfo.email,
                     picture: userInfo.picture,
                     refresh_token,
-                }
-            ]
+                },
+            ],
         });
 
         await createOrRefreshMenuItems();

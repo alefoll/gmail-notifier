@@ -1,11 +1,11 @@
 import { AccountProcessing } from "./account_processing";
-import { config } from "./config";
-import { openGmail } from "./open_gmail";
-import { createOrRefreshMenuItems } from "./create_or_refresh_menu_items";
 import { addAccount } from "./add_account";
+import { config } from "./config";
+import { createOrRefreshMenuItems } from "./create_or_refresh_menu_items";
+import { openGmail } from "./open_gmail";
 
 const allUpdatesByAccount: Map<string, Message[]> = new Map();
-browser.action.onClicked.addListener(async(currentTab) => {
+browser.action.onClicked.addListener(async (currentTab) => {
     const storage = await browser.storage.local.get("accounts");
     const accounts: Account[] = storage?.accounts || [];
 
@@ -41,7 +41,7 @@ browser.menus.create({
     title: "Add an account",
 });
 
-browser.menus.onClicked.addListener(async(element) => {
+browser.menus.onClicked.addListener(async (element) => {
     if (element.menuItemId === "add_account") {
         await addAccount();
 
@@ -60,7 +60,7 @@ browser.menus.onClicked.addListener(async(element) => {
     openGmail({ index: accountIndex });
 });
 
-browser.notifications.onClicked.addListener(async(notificationId) => {
+browser.notifications.onClicked.addListener(async (notificationId) => {
     const [accountEmail, messageId] = notificationId.split("<TAG>");
 
     if (!accountEmail || !messageId) {
@@ -79,28 +79,38 @@ browser.notifications.onClicked.addListener(async(notificationId) => {
     openGmail({ index: accountIndex, messageId });
 });
 
-browser.alarms.onAlarm.addListener(async() => {
+const accountNotificationHistory = new Map<string, Map<string, number>>();
+
+browser.alarms.onAlarm.addListener(async () => {
     const storage = await browser.storage.local.get("accounts");
     const accounts: Account[] = storage?.accounts || [];
 
     await createOrRefreshMenuItems();
 
     for (const account of accounts) {
-        const processing = new AccountProcessing({ account, createOrRefreshMenuItems });
+        if (!accountNotificationHistory.has(account.email)) {
+            accountNotificationHistory.set(account.email, new Map<string, number>());
+        }
+
+        const notificationHistory = accountNotificationHistory.get(account.email);
+
+        if (!notificationHistory) {
+            throw new Error("Can't find notificationHistory");
+        }
+
+        const processing = new AccountProcessing({ account, createOrRefreshMenuItems, notificationHistory });
 
         const onUpdate = (messages: Message[]) => {
             allUpdatesByAccount.set(account.email, messages);
 
             const allMessages = [...allUpdatesByAccount.values()].flat();
 
-            const unreadMessages = allMessages.length;
-
             browser.action.setBadgeText({
-                text: unreadMessages === 0 ? "" : unreadMessages.toString(),
+                text: allMessages.length === 0 ? "" : allMessages.length.toString(),
             });
 
-            browser.action.setIcon({ path: unreadMessages ? config.icons.unread : config.icons.read });
-        }
+            browser.action.setIcon({ path: allMessages.length === 0 ? config.icons.unread : config.icons.read });
+        };
 
         processing.run(onUpdate);
     }

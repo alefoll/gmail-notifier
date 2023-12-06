@@ -12,4 +12,4 @@ export const config = {
         },
     },
     notificationImageUrl: browser.runtime.getURL("../icons/icon-notification.png"),
-}
+};

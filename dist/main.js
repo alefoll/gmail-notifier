@@ -27,8 +27,6 @@
     access_token;
     cachedMessages = /* @__PURE__ */ new Map();
     refresh_token;
-    // messageId, timeToReShownTheNotification
-    notificationHistory = /* @__PURE__ */ new Map();
     // Re shown the notification after 5 minutes
     notificationReShownDelay = 3e5;
     async callApi(url, tries = 0) {
@@ -37,7 +35,7 @@
       }
       const request = await fetch(url, {
         headers: {
-          "Authorization": `Bearer ${this.access_token}`
+          Authorization: `Bearer ${this.access_token}`
         }
       });
       const response = await request.json();
@@ -128,7 +126,7 @@
       const messages = await this.getMessagesFromIds(messageIds);
       onUpdate(messages);
       for (const message of messages) {
-        const notification = this.notificationHistory.get(message.id);
+        const notification = this.deps.notificationHistory.get(message.id);
         if (notification && Date.now() < notification) {
           continue;
         }
@@ -148,61 +146,10 @@ ${headerSubject}`,
           title: headerToWithoutBrackets,
           type: "basic"
         });
-        this.notificationHistory.set(message.id, Date.now() + this.notificationReShownDelay);
+        this.deps.notificationHistory.set(message.id, Date.now() + this.notificationReShownDelay);
       }
     }
   };
-
-  // src/open_gmail.ts
-  async function openGmail({
-    currentTab,
-    index,
-    messageId
-  }) {
-    const pattern = `https://mail.google.com/mail/u/${index}/`;
-    const messageHash = messageId ? `/${messageId}` : "";
-    if (currentTab?.url?.startsWith(`${pattern}#inbox${messageHash}`)) {
-      return;
-    }
-    const tabsAlreadyOpened = await browser.tabs.query({
-      currentWindow: true,
-      url: `${pattern}*`
-    });
-    if (tabsAlreadyOpened.length > 0) {
-      browser.tabs.update(tabsAlreadyOpened[0].id, {
-        active: true,
-        url: `${pattern}#inbox${messageHash}`
-      });
-      return;
-    }
-    browser.tabs.create({ url: `${pattern}#inbox${messageHash}` });
-  }
-
-  // src/create_or_refresh_menu_items.ts
-  async function createOrRefreshMenuItems() {
-    const storage = await browser.storage.local.get("accounts");
-    const accounts = storage?.accounts || [];
-    if (accounts.length > 0) {
-      await browser.menus.create({
-        contexts: ["action"],
-        id: "separator",
-        type: "separator"
-      });
-    } else {
-      await browser.menus.remove("separator");
-    }
-    for (const account of accounts) {
-      await browser.menus.create({
-        contexts: ["action"],
-        enabled: true,
-        icons: {
-          96: account.picture
-        },
-        id: account.email,
-        title: account.email
-      });
-    }
-  }
 
   // node_modules/.pnpm/jwt-decode@4.0.0/node_modules/jwt-decode/build/esm/index.js
   var InvalidTokenError = class extends Error {
@@ -257,6 +204,32 @@ ${headerSubject}`,
       return JSON.parse(decoded);
     } catch (e) {
       throw new InvalidTokenError(`Invalid token specified: invalid json for part #${pos + 1} (${e.message})`);
+    }
+  }
+
+  // src/create_or_refresh_menu_items.ts
+  async function createOrRefreshMenuItems() {
+    const storage = await browser.storage.local.get("accounts");
+    const accounts = storage?.accounts || [];
+    if (accounts.length > 0) {
+      await browser.menus.create({
+        contexts: ["action"],
+        id: "separator",
+        type: "separator"
+      });
+    } else {
+      await browser.menus.remove("separator");
+    }
+    for (const account of accounts) {
+      await browser.menus.create({
+        contexts: ["action"],
+        enabled: true,
+        icons: {
+          96: account.picture
+        },
+        id: account.email,
+        title: account.email
+      });
     }
   }
 
@@ -342,6 +315,31 @@ ${headerSubject}`,
     };
   }
 
+  // src/open_gmail.ts
+  async function openGmail({
+    currentTab,
+    index,
+    messageId
+  }) {
+    const pattern = `https://mail.google.com/mail/u/${index}/`;
+    const messageHash = messageId ? `/${messageId}` : "";
+    if (currentTab?.url?.startsWith(`${pattern}#inbox${messageHash}`)) {
+      return;
+    }
+    const tabsAlreadyOpened = await browser.tabs.query({
+      currentWindow: true,
+      url: `${pattern}*`
+    });
+    if (tabsAlreadyOpened.length > 0) {
+      browser.tabs.update(tabsAlreadyOpened[0].id, {
+        active: true,
+        url: `${pattern}#inbox${messageHash}`
+      });
+      return;
+    }
+    browser.tabs.create({ url: `${pattern}#inbox${messageHash}` });
+  }
+
   // src/main.ts
   var allUpdatesByAccount = /* @__PURE__ */ new Map();
   browser.action.onClicked.addListener(async (currentTab) => {
@@ -395,20 +393,27 @@ ${headerSubject}`,
     }
     openGmail({ index: accountIndex, messageId });
   });
+  var accountNotificationHistory = /* @__PURE__ */ new Map();
   browser.alarms.onAlarm.addListener(async () => {
     const storage = await browser.storage.local.get("accounts");
     const accounts = storage?.accounts || [];
     await createOrRefreshMenuItems();
     for (const account of accounts) {
-      const processing = new AccountProcessing({ account, createOrRefreshMenuItems });
+      if (!accountNotificationHistory.has(account.email)) {
+        accountNotificationHistory.set(account.email, /* @__PURE__ */ new Map());
+      }
+      const notificationHistory = accountNotificationHistory.get(account.email);
+      if (!notificationHistory) {
+        throw new Error("Can't find notificationHistory");
+      }
+      const processing = new AccountProcessing({ account, createOrRefreshMenuItems, notificationHistory });
       const onUpdate = (messages) => {
         allUpdatesByAccount.set(account.email, messages);
         const allMessages = [...allUpdatesByAccount.values()].flat();
-        const unreadMessages = allMessages.length;
         browser.action.setBadgeText({
-          text: unreadMessages === 0 ? "" : unreadMessages.toString()
+          text: allMessages.length === 0 ? "" : allMessages.length.toString()
         });
-        browser.action.setIcon({ path: unreadMessages ? config.icons.unread : config.icons.read });
+        browser.action.setIcon({ path: allMessages.length === 0 ? config.icons.unread : config.icons.read });
       };
       processing.run(onUpdate);
     }
