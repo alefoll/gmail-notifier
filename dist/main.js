@@ -124,30 +124,40 @@
     async run(onUpdate) {
       const messageIds = await this.getUnreadMessageIds();
       const messages = await this.getMessagesFromIds(messageIds);
-      onUpdate(messages);
+      const threads = /* @__PURE__ */ new Map();
       for (const message of messages) {
-        const notification = this.deps.notificationHistory.get(message.id);
-        if (notification && Date.now() < notification) {
-          continue;
+        const thread = threads.get(message.threadId);
+        if (!thread || message.internalDate > thread.internalDate) {
+          threads.set(message.threadId, message);
         }
-        const header = new Map(message.payload.headers.map((element) => [element.name, element.value]));
-        const headerFrom = header.get("From");
-        const headerSubject = header.get("Subject");
-        const headerTo = header.get("To");
-        if (!headerFrom || !headerSubject || !headerTo) {
-          throw new Error(`Invalid header for message id: ${message.id}. Data: ${JSON.stringify(message)}`);
-        }
-        const headerFromtWithoutEmail = headerFrom.replace(/ <.*@.*>/, "");
-        const headerToWithoutBrackets = headerTo.replaceAll(/<|>/g, "");
-        browser.notifications.create(`${this.deps.account.email}<TAG>${message.id}`, {
-          iconUrl: config.notificationImageUrl,
-          message: `${headerFromtWithoutEmail}
-${headerSubject}`,
-          title: headerToWithoutBrackets,
-          type: "basic"
-        });
-        this.deps.notificationHistory.set(message.id, Date.now() + this.notificationReShownDelay);
       }
+      onUpdate([...threads.values()]);
+    }
+    maybeShowNotification({
+      message,
+      lastShown
+    }) {
+      const currentDate = Date.now();
+      if (lastShown && lastShown + this.notificationReShownDelay > currentDate) {
+        return;
+      }
+      const header = new Map(message.payload.headers.map((element) => [element.name, element.value]));
+      const headerFrom = header.get("From");
+      const headerSubject = header.get("Subject");
+      const headerTo = header.get("To");
+      if (!headerFrom || !headerSubject || !headerTo) {
+        throw new Error(`Invalid header for message id: ${message.id}. Data: ${JSON.stringify(message)}`);
+      }
+      const headerFromtWithoutEmail = headerFrom.replace(/ <.*@.*>/, "");
+      const headerToWithoutBrackets = headerTo.replaceAll(/<|>/g, "");
+      browser.notifications.create(`${this.deps.account.email}<TAG>${message.id}`, {
+        iconUrl: config.notificationImageUrl,
+        message: `${headerFromtWithoutEmail}
+${headerSubject}`,
+        title: headerToWithoutBrackets,
+        type: "basic"
+      });
+      return currentDate;
     }
   };
 
@@ -341,20 +351,21 @@ ${headerSubject}`,
   }
 
   // src/main.ts
-  var allUpdatesByAccount = /* @__PURE__ */ new Map();
+  var allUnreadMessagesByAccount = /* @__PURE__ */ new Map();
+  var notificationMessagesByAccount = /* @__PURE__ */ new Map();
   browser.action.onClicked.addListener(async (currentTab) => {
     const storage = await browser.storage.local.get("accounts");
     const accounts = storage?.accounts || [];
     if (accounts.length === 0) {
       return await addAccount();
     }
-    const hasUnreadEmail = [...allUpdatesByAccount.values()].flat().length > 0;
+    const hasUnreadEmail = [...allUnreadMessagesByAccount.values()].flat().length > 0;
     if (!hasUnreadEmail) {
       openGmail({ index: 0, currentTab });
       return;
     }
     accounts.map((account, index) => {
-      const unreadMessages = allUpdatesByAccount.get(account.email);
+      const unreadMessages = allUnreadMessagesByAccount.get(account.email);
       if (!unreadMessages || unreadMessages.length === 0) {
         return;
       }
@@ -393,23 +404,31 @@ ${headerSubject}`,
     }
     openGmail({ index: accountIndex, messageId });
   });
-  var accountNotificationHistory = /* @__PURE__ */ new Map();
   browser.alarms.onAlarm.addListener(async () => {
     const storage = await browser.storage.local.get("accounts");
     const accounts = storage?.accounts || [];
     await createOrRefreshMenuItems();
     for (const account of accounts) {
-      if (!accountNotificationHistory.has(account.email)) {
-        accountNotificationHistory.set(account.email, /* @__PURE__ */ new Map());
+      const processing = new AccountProcessing({ account, createOrRefreshMenuItems });
+      if (!notificationMessagesByAccount.has(account.email)) {
+        notificationMessagesByAccount.set(account.email, /* @__PURE__ */ new Map());
       }
-      const notificationHistory = accountNotificationHistory.get(account.email);
-      if (!notificationHistory) {
-        throw new Error("Can't find notificationHistory");
+      const notificationMessages = notificationMessagesByAccount.get(account.email);
+      if (!notificationMessages) {
+        throw new Error("Unable to reach notificationMessages");
       }
-      const processing = new AccountProcessing({ account, createOrRefreshMenuItems, notificationHistory });
       const onUpdate = (messages) => {
-        allUpdatesByAccount.set(account.email, messages);
-        const allMessages = [...allUpdatesByAccount.values()].flat();
+        allUnreadMessagesByAccount.set(account.email, messages);
+        for (const message of messages) {
+          const notificationShownDate = processing.maybeShowNotification({
+            message,
+            lastShown: notificationMessages.get(message.id)
+          });
+          if (notificationShownDate) {
+            notificationMessages.set(message.id, notificationShownDate);
+          }
+        }
+        const allMessages = [...allUnreadMessagesByAccount.values()].flat();
         browser.action.setBadgeText({
           text: allMessages.length === 0 ? "" : allMessages.length.toString()
         });

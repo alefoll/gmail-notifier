@@ -2,7 +2,7 @@
     "typescript": {
         "bracePosition": "sameLineUnlessHanging",
         "indentWidth": 4,
-        "lineWidth": 200,
+        "lineWidth": 135,
         "newLineKind": "crlf",
         "quoteProps": "asNeeded",
         "quoteStyle": "preferDouble",

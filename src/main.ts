@@ -4,7 +4,9 @@ import { config } from "./config";
 import { createOrRefreshMenuItems } from "./create_or_refresh_menu_items";
 import { openGmail } from "./open_gmail";
 
-const allUpdatesByAccount: Map<string, Message[]> = new Map();
+const allUnreadMessagesByAccount: Map<string, Message[]> = new Map();
+const notificationMessagesByAccount: Map<string, Map<string, number>> = new Map();
+
 browser.action.onClicked.addListener(async (currentTab) => {
     const storage = await browser.storage.local.get("accounts");
     const accounts: Account[] = storage?.accounts || [];
@@ -13,7 +15,7 @@ browser.action.onClicked.addListener(async (currentTab) => {
         return await addAccount();
     }
 
-    const hasUnreadEmail = [...allUpdatesByAccount.values()].flat().length > 0;
+    const hasUnreadEmail = [...allUnreadMessagesByAccount.values()].flat().length > 0;
 
     if (!hasUnreadEmail) {
         openGmail({ index: 0, currentTab });
@@ -21,9 +23,8 @@ browser.action.onClicked.addListener(async (currentTab) => {
         return;
     }
 
-    // How many account by index have unread emails?
     accounts.map((account, index) => {
-        const unreadMessages = allUpdatesByAccount.get(account.email);
+        const unreadMessages = allUnreadMessagesByAccount.get(account.email);
 
         if (!unreadMessages || unreadMessages.length === 0) {
             return;
@@ -79,8 +80,6 @@ browser.notifications.onClicked.addListener(async (notificationId) => {
     openGmail({ index: accountIndex, messageId });
 });
 
-const accountNotificationHistory = new Map<string, Map<string, number>>();
-
 browser.alarms.onAlarm.addListener(async () => {
     const storage = await browser.storage.local.get("accounts");
     const accounts: Account[] = storage?.accounts || [];
@@ -88,22 +87,33 @@ browser.alarms.onAlarm.addListener(async () => {
     await createOrRefreshMenuItems();
 
     for (const account of accounts) {
-        if (!accountNotificationHistory.has(account.email)) {
-            accountNotificationHistory.set(account.email, new Map<string, number>());
+        const processing = new AccountProcessing({ account, createOrRefreshMenuItems });
+
+        if (!notificationMessagesByAccount.has(account.email)) {
+            notificationMessagesByAccount.set(account.email, new Map<string, number>());
         }
 
-        const notificationHistory = accountNotificationHistory.get(account.email);
+        const notificationMessages = notificationMessagesByAccount.get(account.email);
 
-        if (!notificationHistory) {
-            throw new Error("Can't find notificationHistory");
+        if (!notificationMessages) {
+            throw new Error("Unable to reach notificationMessages");
         }
-
-        const processing = new AccountProcessing({ account, createOrRefreshMenuItems, notificationHistory });
 
         const onUpdate = (messages: Message[]) => {
-            allUpdatesByAccount.set(account.email, messages);
+            allUnreadMessagesByAccount.set(account.email, messages);
 
-            const allMessages = [...allUpdatesByAccount.values()].flat();
+            for (const message of messages) {
+                const notificationShownDate = processing.maybeShowNotification({
+                    message,
+                    lastShown: notificationMessages.get(message.id),
+                });
+
+                if (notificationShownDate) {
+                    notificationMessages.set(message.id, notificationShownDate);
+                }
+            }
+
+            const allMessages = [...allUnreadMessagesByAccount.values()].flat();
 
             browser.action.setBadgeText({
                 text: allMessages.length === 0 ? "" : allMessages.length.toString(),

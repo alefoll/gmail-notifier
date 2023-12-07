@@ -12,9 +12,6 @@ export class AccountProcessing {
         private deps: {
             readonly account: Account;
             readonly createOrRefreshMenuItems: () => Promise<void>;
-            // NOTE: we have to inject it otherwise it will be destroyed between each alarm
-            // messageId, timeToReShownTheNotification
-            notificationHistory: Map<string, number>;
         },
     ) {
         this.access_token = deps.account.access_token;
@@ -76,7 +73,8 @@ export class AccountProcessing {
 
             browser.notifications.create(`remove_account-${this.deps.account.email}`, {
                 iconUrl: config.notificationImageUrl,
-                message: `Token for account ${this.deps.account.email} is no longer working. The account is removed, you will need to add it again.`,
+                message:
+                    `Token for account ${this.deps.account.email} is no longer working. The account is removed, you will need to add it again.`,
                 title: "Account removed",
                 type: "basic",
             });
@@ -158,36 +156,54 @@ export class AccountProcessing {
 
         const messages = await this.getMessagesFromIds(messageIds);
 
-        onUpdate(messages);
+        // NOTE: a thread can contains multiple messages, if a message in a thread is unread,
+        // the API can return all the messages in the thread, creating unwanted multiple notifications
+        const threads = new Map<string, Message>();
 
         for (const message of messages) {
-            const notification = this.deps.notificationHistory.get(message.id);
+            const thread = threads.get(message.threadId);
 
-            if (notification && Date.now() < notification) {
-                continue;
+            if (!thread || message.internalDate > thread.internalDate) {
+                threads.set(message.threadId, message);
             }
-
-            const header = new Map(message.payload.headers.map(element => [element.name, element.value]));
-
-            const headerFrom = header.get("From");
-            const headerSubject = header.get("Subject");
-            const headerTo = header.get("To");
-
-            if (!headerFrom || !headerSubject || !headerTo) {
-                throw new Error(`Invalid header for message id: ${message.id}. Data: ${JSON.stringify(message)}`);
-            }
-
-            const headerFromtWithoutEmail = headerFrom.replace(/ <.*@.*>/, "");
-            const headerToWithoutBrackets = headerTo.replaceAll(/<|>/g, "");
-
-            browser.notifications.create(`${this.deps.account.email}<TAG>${message.id}`, {
-                iconUrl: config.notificationImageUrl,
-                message: `${headerFromtWithoutEmail}\n${headerSubject}`,
-                title: headerToWithoutBrackets,
-                type: "basic",
-            });
-
-            this.deps.notificationHistory.set(message.id, Date.now() + this.notificationReShownDelay);
         }
+
+        onUpdate([...threads.values()]);
+    }
+
+    maybeShowNotification({
+        message,
+        lastShown,
+    }: {
+        message: Message;
+        lastShown: number | undefined;
+    }): number | undefined {
+        const currentDate = Date.now();
+
+        if (lastShown && lastShown + this.notificationReShownDelay > currentDate) {
+            return;
+        }
+
+        const header = new Map(message.payload.headers.map(element => [element.name, element.value]));
+
+        const headerFrom = header.get("From");
+        const headerSubject = header.get("Subject");
+        const headerTo = header.get("To");
+
+        if (!headerFrom || !headerSubject || !headerTo) {
+            throw new Error(`Invalid header for message id: ${message.id}. Data: ${JSON.stringify(message)}`);
+        }
+
+        const headerFromtWithoutEmail = headerFrom.replace(/ <.*@.*>/, "");
+        const headerToWithoutBrackets = headerTo.replaceAll(/<|>/g, "");
+
+        browser.notifications.create(`${this.deps.account.email}<TAG>${message.id}`, {
+            iconUrl: config.notificationImageUrl,
+            message: `${headerFromtWithoutEmail}\n${headerSubject}`,
+            title: headerToWithoutBrackets,
+            type: "basic",
+        });
+
+        return currentDate;
     }
 }
